@@ -1,0 +1,248 @@
+#!/bin/bash
+iface=`ls /sys/class/net/ | head -1`
+IP=`ip addr list $iface | grep "  inet " | head -n 1 | cut -d " " -f 6 | cut -d / -f 1`
+via=`ip route | grep default | cut -d " " -f 3`
+export TAB=$'\t'
+nmodem=`lsusb | grep -o "Huawei" | wc -l`
+ipv4=`curl ipinfo.io/ip`
+
+# обновление
+apt-get update
+
+# правим имена интерфейсов, чтобы они определялись попорядку eth1,eth2...
+sed -i -e 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="net.ifnames=0 biosdevname=0"/' /etc/default/grub
+update-grub
+
+# установка необходимык пакетов
+# dos2unix / unix2dos это конвертеры форматов текстовых файлов, преобразование текстовых файлов с разрывами строк DOS или Mac в разрывы строк Unix и наоборот.
+apt-get -y install gcc g++ git make curl usb-modeswitch dos2unix pwgen dsniff
+sed -i -e 's/ domain-name-servers,//' /etc/dhcp/dhclient.conf
+
+
+
+
+
+
+# расширение лимитов на открыте файлов
+echo "root hard nofile 250000
+root soft nofile 500000
+nobody hard nofile 250000
+nobody soft nofile 500000
+* hard nofile 250000
+* soft nofile 500000
+root hard nproc 20000
+root soft nproc 40000
+nobody hard nproc 20000
+nobody soft nproc 40000
+* hard nproc 20000
+* soft nproc 40000" >> /etc/security/limits.conf
+
+
+
+
+
+
+# настрока сетовых интерфейсов для модемов
+echo "# This file describes the network interfaces available on your system
+# and how to activate them. For more information, see interfaces(5).
+
+source /etc/network/interfaces.d/*
+
+# The loopback network interface
+auto lo
+iface lo inet loopback
+
+# The primary network interface
+auto eth0
+iface eth0 inet static
+address $IP
+netmask 255.255.255.0
+gateway $via
+dns-nameservers $via
+
+auto eth1 eth2 eth3 eth4 eth5 eth6 eth7 eth8 eth9 eth10
+iface eth1 inet dhcp
+iface eth2 inet dhcp
+iface eth3 inet dhcp
+iface eth4 inet dhcp
+iface eth5 inet dhcp
+iface eth6 inet dhcp
+iface eth7 inet dhcp
+iface eth8 inet dhcp
+iface eth9 inet dhcp
+iface eth10 inet dhcp" > /etc/network/interfaces
+
+
+
+
+
+
+#  усановка отпечатка андроид
+echo "net.ipv4.ip_forward=1
+net.ipv4.route.min_adv_mss = 256
+net.ipv4.tcp_rmem = 8192 87380 16777216
+net.ipv4.tcp_wmem = 6144 87380 1048576" >> /etc/sysctl.conf
+
+
+
+
+
+
+# создание файла, отвечающий за перевод модема в нужный режим
+cat > /usr/share/usb_modeswitch/12d1:1f01 << END
+DefaultVendor = 0x12d1
+DefaultProduct = 0x1f01
+TargetVendor = 0x12d1
+TargetProduct = 0x14dс
+# switch to 12d1:14dc (default HiLink CDC-Ether mode)
+MessageContent="55534243123456780000000000000a11062000000000000100000000000000"
+END
+# предостаавление прав файлу
+chmod +x /usr/share/usb_modeswitch/12d1:1f01
+#  удаляем файл 40-usb_modeswitch.rules
+rm /lib/udev/rules.d/40-usb_modeswitch.rules
+cd /lib/udev/rules.d/
+# скачиваем файл 40-usb_modeswitch.rules для того чтобы модемы переходили в нужный режим и определялись как сетевая карта
+wget https://kak-podnyat-proksi-ipv6.ru/skript/mob/40-usb_modeswitch.rules
+
+
+
+
+
+
+# создаём таблицу маршрутизации 
+#
+export TAB=$'\t'
+for i in {11..100}
+do
+    echo "$i${TAB}route$i" >> /etc/iproute2/rt_tables
+done
+#
+cd /etc/network/if-up.d
+wget https://kak-podnyat-proksi-ipv6.ru/skript/mob/ip-rout/add_routes16
+mv add_routes16 add_routes
+chmod +x add_routes
+
+cd /root/
+# скачиваем файл скрипта iface_checker.sh
+wget https://kak-podnyat-proksi-ipv6.ru/skript/iface_checker.sh
+# предоставляем им права
+chmod +x iface_checker.sh
+
+# скачиваем файл скрипта рекконетка
+wget https://kak-podnyat-proksi-ipv6.ru/skript/mob/rekonekt.sh
+# предоставляем ему права
+chmod +x rekonekt.sh
+
+
+
+
+
+
+# прописываем крон для модемов
+echo "* * * * * /root/iface_checker.sh >/dev/null 2>&1
+* * * * * /root/ip_route.sh >/dev/null 2>&1
+* * * * * /usr/bin/flock -w 0 /var/run/192.168.11.100.lock /root/rekonekt.sh -r 4G  -i 192.168.11.1 >/dev/null 2>&1
+* * * * * /usr/bin/flock -w 0 /var/run/192.168.12.100.lock /root/rekonekt.sh -r 4G  -i 192.168.12.1 >/dev/null 2>&1
+* * * * * /usr/bin/flock -w 0 /var/run/192.168.13.100.lock /root/rekonekt.sh -r 4G  -i 192.168.13.1 >/dev/null 2>&1
+* * * * * /usr/bin/flock -w 0 /var/run/192.168.14.100.lock /root/rekonekt.sh -r 4G  -i 192.168.14.1 >/dev/null 2>&1
+* * * * * /usr/bin/flock -w 0 /var/run/192.168.15.100.lock /root/rekonekt.sh -r 4G  -i 192.168.15.1 >/dev/null 2>&1
+* * * * * /usr/bin/flock -w 0 /var/run/192.168.16.100.lock /root/rekonekt.sh -r 4G  -i 192.168.16.1 >/dev/null 2>&1
+* * * * * /usr/bin/flock -w 0 /var/run/192.168.17.100.lock /root/rekonekt.sh -r 4G  -i 192.168.17.1 >/dev/null 2>&1
+* * * * * /usr/bin/flock -w 0 /var/run/192.168.18.100.lock /root/rekonekt.sh -r 4G  -i 192.168.18.1 >/dev/null 2>&1
+* * * * * /usr/bin/flock -w 0 /var/run/192.168.19.100.lock /root/rekonekt.sh -r 4G  -i 192.168.19.1 >/dev/null 2>&1
+* * * * * /usr/bin/flock -w 0 /var/run/192.168.20.100.lock /root/rekonekt.sh -r 4G  -i 192.168.20.1 >/dev/null 2>&1
+* * * * * /usr/bin/flock -w 0 /var/run/192.168.21.100.lock /root/rekonekt.sh -r 4G  -i 192.168.21.1 >/dev/null 2>&1" > /var/spool/cron/crontabs/$USER
+dos2unix /var/spool/cron/crontabs/$USER
+/etc/init.d/cron restart
+
+
+
+
+
+
+# создаём дирректорию
+mkdir /usr/local/3proxy
+# перходим в дирректорию
+cd /usr/local/3proxy
+# скачиваем компилированный основной файл 3proxy 
+wget https://kak-podnyat-proksi-ipv6.ru/skript/mob/3proxy
+# пердоставляем ему права
+chmod +x /usr/local/3proxy/3proxy
+#  создаём дирректорию
+mkdir /usr/local/3proxy/mob/
+# перходим в дирректорию
+cd /usr/local/3proxy/mob/
+
+# скачиваем скрипт по проверку пингов на модеме
+wget https://kak-podnyat-proksi-ipv6.ru/skript/mob/chekping.sh
+# пердоставляем ему права
+chmod +x /usr/local/3proxy/mob/chekping.sh
+# создаём дирректорию для логов
+mkdir /usr/local/3proxy/mob/log
+
+# перходим в дирректорию /etc/init.d/
+cd /etc/init.d/
+# скачиваем файл для запуска 3proxy как сервиса
+wget св	i
+# пердоставляем ему права
+chmod +x /etc/init.d/3proxy
+# устанавливаем в автозагрузку 3proxy
+update-rc.d 3proxy defaults
+cd
+# уставливаем архиваторы для архивации логов
+#apt-get install -y aptitude
+#aptitude update
+#aptitude install rar unrar
+#apt install -y zip unzip
+#apt install sshpass
+
+# создаём файлы конфигов 3proxy, указывая своё значение вместо "10" тут for i in {1..10}
+cd /usr/local/3proxy/mob/
+n=1
+ipv4=`curl ipinfo.io/ip`
+iponly=8.8.8.8,2.2.2.2 # впишите ip для авторизации через запятую
+porthttp=7001
+portsocks=8001
+for i in {1..10}; do
+login=`pwgen -s1`
+pass=`pwgen -s1`
+ipmodem=$((${i}+10))
+
+echo "monitor /usr/local/3proxy/mob/3proxy$i.cfg
+
+daemon
+timeouts 1 5 30 60 180 1800 15 60
+maxconn 5000
+nserver 192.168.$ipmodem.1
+nscache 65535
+log /dev/null
+auth iponly strong
+users $login:CL:$pass
+allow $login
+allow * $iponly * * * * * 
+proxy -n -a -p$porthttp -i$IP -e192.168.$ipmodem.100
+socks -n -a -p$portsocks -i$IP -e192.168.$ipmodem.100
+flush" >> /usr/local/3proxy/mob/3proxy$n.cfg
+echo "$ipv4:$porthttp:$login:$pass" >> /root/proxyhttp.txt
+echo "$ipv4:$portsocks:$login:$pass" >> /root/proxysocks.txt
+((inc+=1))
+((n+=1))
+((porthttp+=1))
+((portsocks+=1))
+done
+
+echo "" > /etc/rc.local
+cat > /etc/rc.local << END
+
+
+
+
+
+
+#!/bin/bash
+ulimit -n 600000
+ulimit -u 600000
+sudo route del default && sudo route add default gw $via eth0
+exit 0
+END
